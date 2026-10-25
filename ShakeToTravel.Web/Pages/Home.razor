@@ -1,0 +1,179 @@
+@page "/"
+@using System.Net.Http.Json
+@using ShakeToTravel.Web.Models
+@inject HttpClient Http
+@inject IConfiguration Config
+@implements IDisposable
+
+<PageTitle>Shake to travel!</PageTitle>
+
+<header class="hero">
+    <div class="hero-title">
+        <span class="globe"><i class="fa-solid fa-earth-americas"></i></span>
+        <h1>Shake to travel</h1>
+        <span class="status @(online ? "ok" : "bad")">
+            <span class="dot"></span>@(online ? $"Updated {lastUpdate:HH:mm}" : "Backend offline")
+        </span>
+    </div>
+    <p>Choose a continent (01–03), shake to explore, press 00 to save.</p>
+</header>
+
+@if (latest is not null)
+{
+    <section class="latest @(isNew ? "pulse" : "")">
+        <h2>@((MarkupString)(isNew ? "<i class='fa-solid fa-plane-arrival'></i> Just landed in" : "Latest destination"))</h2>
+        <div class="latest-body">
+            @if (HasFlag(latest))
+            {
+                <img src="@latest.FlagUrl" alt="Flag of @latest.Choice" />
+            }
+            <div class="latest-info">
+                <h3>@latest.Choice <span class="badge">@latest.Cca3</span></h3>
+                <div class="facts">
+                    <span><i class="fa-solid fa-location-dot"></i> @latest.Capital</span>
+                    <span><i class="fa-solid fa-globe"></i> @latest.Region / @latest.Subregion</span>
+                    <span><i class="fa-solid fa-users"></i> @FormatNumber(latest.Population) people</span>
+                    <span><i class="fa-solid fa-mountain"></i> @FormatNumber((long?)latest.Area) km²</span>
+                </div>
+            </div>
+            @if (latest.Latitude is not null && latest.Longitude is not null)
+            {
+                <a class="map-link" href="@MapUrl(latest)" target="_blank">Open map <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+            }
+        </div>
+    </section>
+}
+
+<section class="stats">
+    <div><strong>@countries.Count</strong><span>Countries visited</span></div>
+    @foreach (var region in Regions)
+    {
+        <div><strong>@countries.Count(c => c.Region == region)</strong><span>@region</span></div>
+    }
+</section>
+
+<div class="log-header">
+    <h2>Travel log</h2>
+    <div class="filters">
+        <button class="@(selectedRegion is null ? "active" : "")" @onclick="() => selectedRegion = null">All</button>
+        @foreach (var region in Regions)
+        {
+            <button class="@(selectedRegion == region ? "active" : "")" @onclick="() => selectedRegion = region">@region</button>
+        }
+    </div>
+</div>
+
+@if (error is not null && countries.Count == 0)
+{
+    <p class="error">Could not reach the backend: @error</p>
+}
+else if (!Filtered.Any())
+{
+    <p class="empty">No trips yet — grab the board and shake it! <i class="fa-solid fa-hand-point-up"></i></p>
+}
+else
+{
+    <section class="log">
+        @foreach (var c in Filtered)
+        {
+            <article class="log-row">
+                <div class="log-country">
+                    @if (HasFlag(c))
+                    {
+                        <img src="@c.FlagUrl" alt="Flag of @c.Choice" />
+                    }
+                    <div>
+                        <strong>@c.Choice</strong>
+                        <span class="muted">@c.Capital</span>
+                    </div>
+                </div>
+                <span class="log-region"><i class="fa-solid fa-globe"></i> @c.Region</span>
+                <span class="log-saved">Saved @c.CreatedAt.ToLocalTime().ToString("HH:mm")</span>
+                @if (c.Latitude is not null && c.Longitude is not null)
+                {
+                    <a class="map-link" href="@MapUrl(c)" target="_blank">View on map <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                }
+                else
+                {
+                    <span></span>
+                }
+            </article>
+        }
+    </section>
+}
+
+@code {
+    private static readonly string[] Regions = { "Europe", "Asia", "Africa" };
+
+    private List<Country> countries = new();
+    private Country? latest;
+    private bool isNew;
+    private bool online;
+    private string? error;
+    private DateTime lastUpdate;
+    private string? selectedRegion;
+    private PeriodicTimer? timer;
+    private readonly CancellationTokenSource cts = new();
+
+    private IEnumerable<Country> Filtered => countries
+        .Where(c => selectedRegion is null || c.Region == selectedRegion);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync(firstLoad: true);
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        var seconds = int.TryParse(Config["PollSeconds"], out var s) ? s : 3;
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(seconds));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cts.Token))
+            {
+                await LoadAsync(firstLoad: false);
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task LoadAsync(bool firstLoad)
+    {
+        try
+        {
+            var result = await Http.GetFromJsonAsync<List<Country>>("api/countries", cts.Token) ?? new();
+            var newest = result.FirstOrDefault();
+            if (!firstLoad && newest is not null && newest.Id != latest?.Id)
+            {
+                isNew = true;
+            }
+            latest = newest;
+            countries = result;
+            online = true;
+            error = null;
+            lastUpdate = DateTime.Now;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            online = false;
+            error = ex.Message;
+        }
+    }
+
+    private static bool HasFlag(Country c) =>
+        !string.IsNullOrWhiteSpace(c.FlagUrl) && c.FlagUrl.StartsWith("http");
+
+    private static string FormatNumber(long? n) => n is null ? "-" : n.Value.ToString("N0");
+
+    private static string MapUrl(Country c) =>
+        FormattableString.Invariant($"https://www.openstreetmap.org/?mlat={c.Latitude}&mlon={c.Longitude}#map=5/{c.Latitude}/{c.Longitude}");
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        timer?.Dispose();
+        cts.Dispose();
+    }
+}

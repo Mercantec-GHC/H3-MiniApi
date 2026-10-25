@@ -53,7 +53,8 @@ public class CountriesController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            query = query.Where(c => EF.Functions.ILike(c.Choice, $"%{search}%"));
+            var lowered = search.ToLower();
+            query = query.Where(c => c.Choice.ToLower().Contains(lowered));
         }
 
         var countries = await query.OrderByDescending(c => c.CreatedAt).ToListAsync();

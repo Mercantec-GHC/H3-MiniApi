@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="MiniApi/MiniApi.csproj" />
+  <Project Path="ShakeToTravel.Web/ShakeToTravel.Web.csproj" />
+</Solution>
