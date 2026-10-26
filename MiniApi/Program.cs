@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using MiniApi.Data;
-using MiniApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,33 +30,6 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
-// Seed some sample data when using the in-memory database so the frontend has something to show.
-if (useInMemory)
-{
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-    if (!db.Countries.Any())
-    {
-        db.Countries.Add(new Country
-        {
-            ApiName = "restcountries",
-            Choice = "Denmark",
-            Cca3 = "DNK",
-            Capital = "Copenhagen",
-            Region = "Europe",
-            Subregion = "Northern Europe",
-            Population = 5831000,
-            Area = 43094,
-            Latitude = 56.0,
-            Longitude = 10.0,
-            FlagUrl = "https://flagcdn.com/dk.svg",
-            CreatedAt = DateTime.UtcNow
-        });
-        db.SaveChanges();
-    }
-}
-
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -66,8 +38,12 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
-app.UseHttpsRedirection();
+else
+{
+    // Only force HTTPS outside development. In development the API is served over
+    // plain HTTP (http://0.0.0.0:5144) so LAN devices like the Arduino can POST to it.
+    app.UseHttpsRedirection();
+}
 
 app.UseCors();
 
